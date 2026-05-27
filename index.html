@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0d1117">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Fitness Tracker">
+  <title>Fitness Tracker</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0d1117;
+      color: #f0f4ff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow-x: hidden;
+    }
+    #root { padding-bottom: 60px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const GOALS = { kcal: 2100, protein: 135, fat: 70, carbs: 240, water: 3000 };
+
+    const mealPresets = [
+      { name: "Omelette + Speck", kcal: 380, protein: 25, fat: 28, carbs: 2 },
+      { name: "Proteinshake (40g)", kcal: 160, protein: 32, fat: 2, carbs: 5 },
+      { name: "Skyr (200g)", kcal: 130, protein: 20, fat: 0.5, carbs: 6 },
+      { name: "Thon Baguette Migros", kcal: 550, protein: 17, fat: 18, carbs: 65 },
+      { name: "Thunfisch (80g) + Reis", kcal: 373, protein: 25, fat: 2, carbs: 48 },
+      { name: "Banane", kcal: 90, protein: 1, fat: 0.3, carbs: 23 },
+      { name: "Poulet + Gemüse", kcal: 420, protein: 50, fat: 15, carbs: 25 },
+      { name: "Döner", kcal: 650, protein: 28, fat: 35, carbs: 55 },
+      { name: "Wienerli im Teig (Migros)", kcal: 320, protein: 11, fat: 22, carbs: 22 },
+      { name: "Emmi Latte Eiskaffee", kcal: 160, protein: 5, fat: 5, carbs: 24 },
+    ];
+
+    function Ring({ value, max, color, label, unit }) {
+      const size = 90, stroke = 8, r = (size - stroke) / 2, circ = 2 * Math.PI * r;
+      const pct = Math.min(value / max, 1), dash = pct * circ;
+      return (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+          <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+            <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#1e2530" strokeWidth={stroke} />
+            <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+              strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" style={{ transition: "stroke-dasharray 0.6s" }} />
+          </svg>
+          <div style={{ textAlign: "center", marginTop: -size/2 - 4, lineHeight: 1 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#f0f4ff" }}>{value}</div>
+            <div style={{ fontSize: 10, color: "#6b7a99" }}>{unit}</div>
+          </div>
+          <div style={{ fontSize: 11, color: "#8892aa", marginTop: size/2 - 8 }}>{label}</div>
+        </div>
+      );
+    }
+
+    function getMealHealth(meal) {
+      const proteinRatio = meal.protein / meal.kcal * 100;
+      const carbRatio = meal.carbs / meal.kcal * 100;
+      const fatRatio = meal.fat / meal.kcal * 100;
+      
+      if (meal.fat > 25 && proteinRatio < 6) return "🥀";
+      if (meal.carbs > 55) return "🥀";
+      if (meal.fat > 32) return "🥀";
+      if (meal.protein < 3 && meal.carbs > 40) return "🥀";
+      
+      return "✅";
+    }
+
+    function SimpleLineGraph({ data, label, color, unit, height = 120 }) {
+      if (!data || data.length < 2) return <div style={{ fontSize: 11, color: "#6b7a99", padding: 12 }}>Noch keine Daten</div>;
+      
+      const min = Math.min(...data) - 1;
+      const max = Math.max(...data) + 1;
+      const range = max - min;
+      const w = 280, h = height;
+      const pointW = w / (data.length - 1);
+      
+      const points = data.map((v, i) => ({
+        x: i * pointW,
+        y: h - ((v - min) / range) * h
+      }));
+      
+      const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+      
+      return (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: "#6b7a99", marginBottom: 4 }}>{label} ({data[data.length - 1]}{unit})</div>
+          <svg width={w} height={h} style={{ background: "#0d1117", borderRadius: 8 }}>
+            <path d={pathD} stroke={color} strokeWidth="2" fill="none" />
+            {points.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="2" fill={color} />)}
+          </svg>
+          <div style={{ fontSize: 9, color: "#6b7a99", marginTop: 2 }}>Min: {min.toFixed(1)}{unit} | Max: {max.toFixed(1)}{unit}</div>
+        </div>
+      );
+    }
+
+    function FitnessTracker() {
+      const [allData, setAllData] = useState({});
+      const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
+      const [tab, setTab] = useState("today");
+      const [showMealForm, setShowMealForm] = useState(false);
+      const [meal, setMeal] = useState({ name: "", kcal: "", protein: "" });
+      const [showCalendar, setShowCalendar] = useState(false);
+      const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+      const exportData = () => {
+        const dataStr = JSON.stringify(allData, null, 2);
+        const dataBlob = new Blob([dataStr], { type: "application/json" });
+        const url = URL.createObjectURL(dataBlob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `fitness-backup-${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+      };
+
+      const importData = () => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".json";
+        input.onchange = (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            try {
+              const imported = JSON.parse(event.target.result);
+              setAllData(imported);
+              alert("✅ Daten erfolgreich importiert!");
+            } catch (err) {
+              alert("❌ Fehler beim Importieren. Datei ist kein gültiges JSON.");
+            }
+          };
+          reader.readAsText(file);
+        };
+        input.click();
+      };
+
+      // Load data from localStorage on mount
+      useEffect(() => {
+        const stored = localStorage.getItem("fitnessData");
+        if (stored) {
+          try {
+            setAllData(JSON.parse(stored));
+          } catch (err) {
+            console.error("Fehler beim Laden der Daten:", err);
+          }
+        }
+      }, []);
+
+      // Save data to localStorage whenever it changes
+      useEffect(() => {
+        localStorage.setItem("fitnessData", JSON.stringify(allData));
+      }, [allData]);
+
+      const data = allData[currentDate] || { meals: [], workouts: [], water: 0, sleepDuration: 0, sleepScore: 0, bodyComp: false, kreatin: false, meds: false, proteinShake: false, weight: null, bodyFat: null };
+
+      const totalKcal = data.meals.reduce((sum, m) => sum + (m.kcal || 0), 0);
+      const totalProtein = data.meals.reduce((sum, m) => sum + (m.protein || 0), 0);
+      const totalFat = data.meals.reduce((sum, m) => sum + (m.fat || 0), 0);
+      const totalCarbs = data.meals.reduce((sum, m) => sum + (m.carbs || 0), 0);
+
+      const addMeal = (meal) => {
+        if (!meal.name || !meal.kcal) {
+          alert("❌ Name und kcal erforderlich");
+          return;
+        }
+        const newMeals = [...data.meals, { ...meal, protein: meal.protein || 0, fat: meal.fat || 0, carbs: meal.carbs || 0 }];
+        setAllData({ ...allData, [currentDate]: { ...data, meals: newMeals } });
+      };
+
+      const removeMeal = (index) => {
+        const newMeals = data.meals.filter((_, i) => i !== index);
+        setAllData({ ...allData, [currentDate]: { ...data, meals: newMeals } });
+      };
+
+      const addWorkout = (workout) => {
+        const newWorkouts = [...data.workouts, workout];
+        setAllData({ ...allData, [currentDate]: { ...data, workouts: newWorkouts } });
+      };
+
+      const removeWorkout = (index) => {
+        const newWorkouts = data.workouts.filter((_, i) => i !== index);
+        setAllData({ ...allData, [currentDate]: { ...data, workouts: newWorkouts } });
+      };
+
+      const addWater = (amount) => {
+        setAllData({ ...allData, [currentDate]: { ...data, water: data.water + amount } });
+      };
+
+      const updateBodyComp = (weight, bodyFat) => {
+        setAllData({ ...allData, [currentDate]: { ...data, weight: weight !== null ? +weight : null, bodyFat: bodyFat !== null ? +bodyFat : null } });
+      };
+
+      const getDayHealth = () => {
+        if (totalKcal < 500) return "✅";
+        const proteinRatio = (totalProtein / totalKcal) * 100;
+        if (proteinRatio < 12) return "🥀";
+        if (totalCarbs > 300) return "🥀";
+        if (totalFat > 100) return "🥀";
+        return "✅";
+      };
+
+      const resetDayData = () => {
+        const newData = { ...allData };
+        delete newData[currentDate];
+        setAllData(newData);
+        setShowResetConfirm(false);
+      };
+
+      const getCalendarDates = () => Object.keys(allData).sort();
+      const calendarDates = getCalendarDates();
+      const prevDate = () => {
+        const dates = calendarDates;
+        const idx = dates.indexOf(currentDate);
+        if (idx > 0) setCurrentDate(dates[idx - 1]);
+        else setCurrentDate(new Date(new Date(currentDate).getTime() - 86400000).toISOString().split('T')[0]);
+      };
+      const nextDate = () => {
+        const dates = calendarDates;
+        const idx = dates.indexOf(currentDate);
+        if (idx >= 0 && idx < dates.length - 1) setCurrentDate(dates[idx + 1]);
+        else setCurrentDate(new Date(new Date(currentDate).getTime() + 86400000).toISOString().split('T')[0]);
+      };
+
+      // 7-Tage Daten
+      const getLast7Days = () => {
+        const days = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(new Date().getTime() - i * 86400000);
+          days.push(d.toISOString().split('T')[0]);
+        }
+        return days;
+      };
+      const last7 = getLast7Days();
+      const last7Data = last7.map(d => allData[d] || { sleepDuration: 0, sleepScore: 0, meals: [] });
+
+      const avgSleepDuration = (last7Data.reduce((sum, d) => sum + (d.sleepDuration || 0), 0) / 7).toFixed(1);
+      const avgSleepScore = Math.round(last7Data.reduce((sum, d) => sum + (d.sleepScore || 0), 0) / 7);
+      const avgKcal = Math.round(last7Data.reduce((sum, d) => sum + d.meals.reduce((m, meal) => m + (meal.kcal || 0), 0), 0) / 7);
+      const avgProtein = Math.round(last7Data.reduce((sum, d) => sum + d.meals.reduce((m, meal) => m + (meal.protein || 0), 0), 0) / 7);
+
+      const bodyCompGraphData = last7.map(d => ({ date: d, weight: allData[d]?.weight || null, bodyFat: allData[d]?.bodyFat || null })).filter(d => d.weight || d.bodyFat);
+
+      return (
+        <div>
+          {/* HEADER */}
+          <div style={{ borderBottom: "1px solid #1a2133", padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#34d399" }}>{new Date(currentDate).toLocaleDateString("de-CH")}</div>
+            <button onClick={() => setShowResetConfirm(true)} title="Tagesdaten löschen" style={{ background: "#7f1d1d", border: "none", color: "#fca5a5", padding: "4px 8px", fontSize: 12, fontWeight: 600, cursor: "pointer", borderRadius: 4 }}>🗑️</button>
+          </div>
+
+          {/* Reset Confirmation Popup */}
+          {showResetConfirm && (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+              <div style={{ background: "#111827", padding: 20, borderRadius: 12, border: "1px solid #1a2133", textAlign: "center", maxWidth: 300 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>⚠️ Alle Daten von heute löschen?</div>
+                <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                  <button onClick={() => setShowResetConfirm(false)} style={{ padding: "8px 12px", background: "#1a3a3a", border: "1px solid #34d399", color: "#34d399", fontWeight: 600, cursor: "pointer", borderRadius: 6 }}>Abbrechen</button>
+                  <button onClick={resetDayData} style={{ padding: "8px 12px", background: "#7f1d1d", border: "1px solid #fca5a5", color: "#fca5a5", fontWeight: 600, cursor: "pointer", borderRadius: 6 }}>Löschen</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* DATE NAVIGATION */}
+          <div style={{ padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #1a2133" }}>
+            <button onClick={prevDate} style={{ background: "#1a2133", border: "none", color: "#8892aa", padding: "6px 8px", borderRadius: 6, cursor: "pointer" }}>⬅️</button>
+            <button onClick={() => setShowCalendar(!showCalendar)} style={{ background: "none", border: "none", color: "#8892aa", fontSize: 12, cursor: "pointer" }}>📅</button>
+            <button onClick={nextDate} style={{ background: "#1a2133", border: "none", color: "#8892aa", padding: "6px 8px", borderRadius: 6, cursor: "pointer" }}>➡️</button>
+          </div>
+
+          {/* CALENDAR POPUP */}
+          {showCalendar && (
+            <div style={{ background: "#111827", padding: 16, borderBottom: "1px solid #1a2133" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+                {last7.map(d => (
+                  <button key={d} onClick={() => { setCurrentDate(d); setShowCalendar(false); }} 
+                    style={{ padding: "6px", fontSize: 11, background: d === currentDate ? "#34d399" : calendarDates.includes(d) ? "#1a2133" : "#0d1117", 
+                      color: d === currentDate ? "#000" : "#8892aa", border: "1px solid #1a2133", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
+                    {new Date(d).getDate()} {calendarDates.includes(d) && d !== currentDate && "●"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB CONTENT */}
+          {tab === "today" && (
+            <div style={{ padding: 20 }}>
+              {/* MACRO RINGS */}
+              <div style={{ display: "flex", justifyContent: "space-around", marginBottom: 24, gap: 12 }}>
+                <Ring value={totalKcal} max={GOALS.kcal} color="#f59e0b" label="Kalorien" unit="kcal" />
+                <Ring value={totalProtein} max={GOALS.protein} color="#60a5fa" label="Protein" unit="g" />
+              </div>
+
+              {/* FETT + CARBS + WASSER */}
+              <div style={{ background: "#111827", borderRadius: 12, padding: 16, border: "1px solid #1a2133", marginBottom: 16 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#6b7a99", marginBottom: 4 }}>Fett</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#f0f4ff" }}>{totalFat}g / {GOALS.fat}g</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#6b7a99", marginBottom: 4 }}>Kohlenhydrate</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#f0f4ff" }}>{totalCarbs}g / {GOALS.carbs}g</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* WASSER */}
+              <div style={{ background: "#111827", borderRadius: 12, padding: 16, border: "1px solid #1a2133", marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, color: "#6b7a99" }}>💧 Wasser</div>
+                  <div style={{ fontSize: 14, fontWeight: 800 }}>{data.water}ml / {GOALS.water}ml</div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                  <button onClick={() => addWater(250)} style={{ padding: "8px", background: "#0d1117", border: "1px solid #1a2133", borderRadius: 8, color: "#8892aa", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>+250ml</button>
+                  <button onClick={() => addWater(500)} style={{ padding: "8px", background: "#0d1117", border: "1px solid #1a2133", borderRadius: 8, color: "#8892aa", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>+500ml</button>
+                  <button onClick={() => addWater(750)} style={{ padding: "8px", background: "#0d1117", border: "1px solid #1a2133", borderRadius: 8, color: "#8892aa", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>+750ml</button>
+                </div>
+              </div>
+
+              {/* VERBLEIBENDES DEFIZIT */}
+              <div style={{ background: "#111827", borderRadius: 12, padding: 16, border: "1px solid #1a2133", marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: "#6b7a99", marginBottom: 8 }}>Verbleibendes Defizit</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: "#f0f4ff", marginBottom: 4 }}>{Math.max(0, GOALS.kcal - totalKcal)} kcal</div>
+                <div style={{ fontSize: 11, color: "#6b7a99" }}>{getDayHealth()} Makro-Balance</div>
+              </div>
+
+              {/* BUTTON SECTION */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+                <button onClick={() => { const w = prompt("Gewicht (kg):"); const f = prompt("KFA (%)"); if (w) updateBodyComp(w, f); }} style={{ padding: "12px", background: "#1a3a2e", border: "1px solid #34d399", borderRadius: 8, color: "#34d399", fontWeight: 600, cursor: "pointer" }}>⚖️ Body Comp</button>
+                <button onClick={() => setAllData({ ...allData, [currentDate]: { ...data, kreatin: !data.kreatin } })} style={{ padding: "12px", background: data.kreatin ? "#3a2a1a" : "#1a1a0a", border: "1px solid " + (data.kreatin ? "#fbbf24" : "#6b7a99"), borderRadius: 8, color: data.kreatin ? "#fbbf24" : "#6b7a99", fontWeight: 600, cursor: "pointer", fontSize: 12 }}>💊 Kreatin {data.kreatin ? "✓" : ""}</button>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+                <button onClick={() => setAllData({ ...allData, [currentDate]: { ...data, meds: !data.meds } })} style={{ padding: "12px", background: data.meds ? "#3a1a1a" : "#1a1a0a", border: "1px solid " + (data.meds ? "#f87171" : "#6b7a99"), borderRadius: 8, color: data.meds ? "#f87171" : "#6b7a99", fontWeight: 600, cursor: "pointer", fontSize: 12 }}>💉 Medikamente {data.meds ? "✓" : ""}</button>
+                <button onClick={() => { setAllData({ ...allData, [currentDate]: { ...data, proteinShake: !data.proteinShake } }); if (!data.proteinShake) addMeal({ name: "Proteinshake (300kcal)", kcal: 300, protein: 40, fat: 5, carbs: 8 }); }} style={{ padding: "12px", background: data.proteinShake ? "#1a2a3a" : "#1a1a0a", border: "1px solid " + (data.proteinShake ? "#60a5fa" : "#6b7a99"), borderRadius: 8, color: data.proteinShake ? "#60a5fa" : "#6b7a99", fontWeight: 600, cursor: "pointer", fontSize: 12 }}>🥤 Protein Shake {data.proteinShake ? "✓" : ""}</button>
+              </div>
+
+              {/* SCHLAF SECTION */}
+              <div style={{ background: "#111827", borderRadius: 12, padding: 16, border: "1px solid #1a2133", marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: "#6b7a99", marginBottom: 12, textTransform: "uppercase" }}>Schlaf</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#6b7a99", display: "block", marginBottom: 4 }}>Stunden (0-12)</label>
+                    <input type="number" min="0" max="12" value={Math.floor(data.sleepDuration)} onChange={e => { const h = +e.target.value; const m = data.sleepDuration % 1 * 60; setAllData({ ...allData, [currentDate]: { ...data, sleepDuration: h + m/60 } }); }} style={{ width: "100%", padding: "8px 10px", background: "#0d1117", border: "1px solid #1a2133", borderRadius: 8, color: "#f0f4ff", fontSize: 13, outline: "none" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#6b7a99", display: "block", marginBottom: 4 }}>Minuten (0-59)</label>
+                    <input type="number" min="0" max="59" value={Math.round((data.sleepDuration % 1) * 60)} onChange={e => { const m = +e.target.value; const h = Math.floor(data.sleepDuration); setAllData({ ...allData, [currentDate]: { ...data, sleepDuration: h + m/60 } }); }} style={{ width: "100%", padding: "8px 10px", background: "#0d1117", border: "1px solid #1a2133", borderRadius: 8, color: "#f0f4ff", fontSize: 13, outline: "none" }} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: "#6b7a99", display: "block", marginBottom: 4 }}>Score (0-100)</label>
+                  <input type="number" min="0" max="100" value={data.sleepScore} onChange={e => setAllData({ ...allData, [currentDate]: { ...data, sleepScore: +e.target.value } })} style={{ width: "100%", padding: "8px 10px", background: "#0d1117", border: "1px solid #1a2133", borderRadius: 8, color: "#f0f4ff", fontSize: 13, outline: "none" }} />
+                </div>
+              </div>
+
+              {/* KM GELAUFEN */}
+              <div style={{ background: "#111827", borderRadius: 12, padding: 16, border: "1px solid #1a2133", marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: "#6b7a99", marginBottom: 4 }}>🏃 Km gelaufen heute</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#34d399" }}>{data.workouts.filter(w => w.art === "5k" || w.art === "10k" || w.art === "Intervalle").reduce((sum, w) => sum + (w.km || 0), 0).toFixed(1)} km</div>
+              </div>
+
+              {/* SLEEP AVG */}
+              <div style={{ background: "#111827", borderRadius: 12, padding: 16, border: "1px solid #1a2133" }}>
+                <div style={{ fontSize: 11, color: "#6b7a99", marginBottom: 4 }}>Ø Schlafdauer (7 Tage)</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "#a78bfa" }}>{avgSleepDuration}h</div>
+              </div>
+            </div>
+          )}
+
+          {tab === "mahlzeiten" && (
+            <div style={{ padding: 20 }}>
+              {/* PRESETS */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: "#6b7a99", marginBottom: 8, textTransform: "uppercase" }}>Schnellauswahl</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 6 }}>
+                  {mealPresets.map((preset, i) => (
+                    <button key={i} onClick={() => { addMeal(preset); }} style={{ textAlign: "left", padding: "12px", background: "#111827", border: "1px solid #1a2133", borderRadius: 8, color: "#f0f4ff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                      {preset.name} - {preset.kcal} kcal
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* MANUAL FORM */}
+              <button onClick={() => setShowMealForm(!showMealForm)} style={{ width: "100%", padding: "12px", background: "#34d399", border: "none", borderRadius: 8, color: "#000", fontWeight: 700, cursor: "pointer", marginBottom: 16 }}>+ Manuell hinzufügen</button>
+
+              {showMealForm && (
+                <div style={{ background: "#111827", borderRadius: 12, padding: 16, border: "1px solid #1a2133", marginBottom: 16, display: "grid", gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#6b7a99", display: "block", marginBottom: 4 }}>Name</label>
+                    <input type="text" value={meal.name} onChange={e => setMeal({ ...meal, name: e.target.value })}
+                      style={{ width: "100%", padding: "8px 10px", background: "#0d1117", border: "1px solid #1a2133", borderRadius: 8, color: "#f0f4ff", fontSize: 13, outline: "none" }} placeholder="z.B. Pizza" />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#6b7a99", display: "block", marginBottom: 4 }}>kcal</label>
+                    <input type="number" value={meal.kcal} onChange={e => setMeal({ ...meal, kcal: +e.target.value })}
+                      style={{ width: "100%", padding: "8px 10px", background: "#0d1117", border: "1px solid #1a2133", borderRadius: 8, color: "#f0f4ff", fontSize: 13, outline: "none" }} placeholder="500" />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#6b7a99", display: "block", marginBottom: 4 }}>Protein (g)</label>
+                    <input type="number" value={meal.protein} onChange={e => setMeal({ ...meal, protein: +e.target.value })}
+                      style={{ width: "100%", padding: "8px 10px", background: "#0d1117", border: "1px solid #1a2133", borderRadius: 8, color: "#f0f4ff", fontSize: 13, outline: "none" }} placeholder="25" />
+                  </div>
+                  <button onClick={() => { addMeal(meal); setMeal({ name: "", kcal: "", protein: "" }); }}
+                    style={{ background: "#4ade80", border: "none", borderRadius: 8, color: "#000", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>➕ Hinzufügen</button>
+                </div>
+              )}
+
+              {data.meals.map((m, i) => (
+                <div key={i} style={{ background: "#111827", borderRadius: 12, padding: "12px 16px", border: "1px solid #1a2133", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{m.name}</div>
+                    <div style={{ fontSize: 11, color: "#8892aa" }}>{m.kcal} kcal | {m.protein}g Protein</div>
+                  </div>
+                  <button onClick={() => removeMeal(i)} style={{ background: "#f87171", border: "none", borderRadius: 6, color: "#fff", padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === "workout" && (
+            <div style={{ padding: 20 }}>
+              <div style={{ background: "#111827", borderRadius: 12, padding: 12, border: "1px solid #1a2133", marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: "#6b7a99", marginBottom: 8, textTransform: "uppercase" }}>Cardio</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                  {["5k", "10k", "Intervalle", "Joggen"].map(art => (
+                    <button key={art} onClick={() => document.getElementById(`workout-${art}`).focus()}
+                      style={{ padding: "8px", background: "#0d1117", border: "1px solid #1a2133", borderRadius: 8, color: "#8892aa", fontSize: 12, cursor: "pointer" }}>
+                      {art === "5k" ? "🏃 5k" : art === "10k" ? "🏃 10k" : art === "Intervalle" ? "⚡ Intervalle" : "🚶 Joggen"}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input id="workout-time" type="number" placeholder="Zeit (min)" style={{ padding: "8px 10px", background: "#0d1117", border: "1px solid #1a2133", borderRadius: 8, color: "#f0f4ff", outline: "none" }} />
+                  <input id="workout-km" type="number" placeholder="Km (für Intervalle)" style={{ padding: "8px 10px", background: "#0d1117", border: "1px solid #1a2133", borderRadius: 8, color: "#f0f4ff", outline: "none" }} />
+                </div>
+                <button onClick={() => {
+                  const dauer = +document.getElementById("workout-time").value;
+                  const km = +document.getElementById("workout-km").value || 0;
+                  if (dauer) {
+                    addWorkout({ art: "5k", dauer });
+                    document.getElementById("workout-time").value = "";
+                  }
+                }} style={{ width: "100%", marginTop: 8, padding: "10px", background: "#34d399", border: "none", borderRadius: 8, color: "#000", fontWeight: 700, cursor: "pointer" }}>➕ Training</button>
+              </div>
+
+              {data.workouts.map((w, i) => (
+                <div key={i} style={{ background: "#111827", borderRadius: 12, padding: "12px 16px", border: "1px solid #1a2133", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{w.art} - {w.dauer}min {w.km ? `(${w.km}km)` : ""}</div>
+                  </div>
+                  <button onClick={() => removeWorkout(i)} style={{ background: "#f87171", border: "none", borderRadius: 6, color: "#fff", padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === "fortschritt" && (
+            <div style={{ padding: 20 }}>
+              {/* Export/Import Buttons */}
+              <div style={{ display: "flex", gap: 6, marginBottom: 16, justifyContent: "flex-end" }}>
+                <button onClick={exportData} title="Alle Daten herunterladen" style={{ background: "#1a3a3a", border: "1px solid #34d399", color: "#34d399", padding: "4px 8px", fontSize: 10, fontWeight: 600, cursor: "pointer", borderRadius: 4 }}>💾 Export</button>
+                <button onClick={importData} title="Daten importieren" style={{ background: "#3a2a1a", border: "1px solid #fbbf24", color: "#fbbf24", padding: "4px 8px", fontSize: 10, fontWeight: 600, cursor: "pointer", borderRadius: 4 }}>📂 Import</button>
+              </div>
+
+              <div style={{ background: "#111827", borderRadius: 16, padding: 16, border: "1px solid #1a2133", marginBottom: 16 }}>
+                <div style={{ fontSize: 12, color: "#6b7a99", marginBottom: 12, textTransform: "uppercase" }}>7-Tage Durchschnitt</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#6b7a99", marginBottom: 2 }}>Schlaf Dauer</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: "#a78bfa" }}>{avgSleepDuration}h</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#6b7a99", marginBottom: 2 }}>Schlaf Score</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: "#a78bfa" }}>{avgSleepScore}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#6b7a99", marginBottom: 2 }}>Ø Kalorien</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "#f59e0b" }}>{avgKcal}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#6b7a99", marginBottom: 2 }}>Ø Protein</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "#60a5fa" }}>{avgProtein}g</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ background: "#111827", borderRadius: 16, padding: 16, border: "1px solid #1a2133", marginBottom: 16 }}>
+                <div style={{ fontSize: 12, color: "#6b7a99", marginBottom: 12, textTransform: "uppercase" }}>Body Composition Trend</div>
+                {bodyCompGraphData.length > 0 ? (
+                  <>
+                    {SimpleLineGraph({
+                      data: bodyCompGraphData.map(d => d.weight).filter(w => w),
+                      label: "Körpergewicht",
+                      color: "#60a5fa",
+                      unit: "kg"
+                    })}
+                    {SimpleLineGraph({
+                      data: bodyCompGraphData.map(d => d.bodyFat).filter(bf => bf),
+                      label: "Körperfettanteil",
+                      color: "#f87171",
+                      unit: "%"
+                    })}
+                  </>
+                ) : (
+                  <div style={{ fontSize: 11, color: "#6b7a99", padding: 12 }}>Gib morgens Gewicht und KFA ein um Trends zu sehen</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB BUTTONS */}
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, borderTop: "1px solid #1a2133", background: "linear-gradient(180deg, #111827 0%, #0d1117 100%)", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 0 }}>
+            {[
+              { key: "today", label: "Übersicht", icon: "📊" },
+              { key: "mahlzeiten", label: "Mahlzeiten", icon: "🍽️" },
+              { key: "workout", label: "Training", icon: "💪" },
+              { key: "fortschritt", label: "Fortschritt", icon: "📈" },
+            ].map(t => (
+              <button key={t.key} onClick={() => setTab(t.key)} style={{
+                padding: "10px 0", border: "none", background: tab === t.key ? "#1e3a3a" : "#0d1117",
+                color: tab === t.key ? "#34d399" : "#6b7a99", fontWeight: 700, cursor: "pointer", fontSize: 12
+              }}>
+                {t.icon} {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<FitnessTracker />);
+  </script>
+</body>
+</html>
