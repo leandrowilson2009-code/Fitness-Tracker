@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Fitness">
+  <title>Fitness Tracker Pro</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    
+    :root {
+      --bg: #000;
+      --bg-elev-1: rgba(28, 28, 30, 0.72);
+      --bg-elev-2: rgba(44, 44, 46, 0.6);
+      --bg-elev-3: rgba(58, 58, 60, 0.5);
+      --border: rgba(255, 255, 255, 0.06);
+      --border-strong: rgba(255, 255, 255, 0.12);
+      --text: #fff;
+      --text-secondary: rgba(235, 235, 245, 0.6);
+      --text-tertiary: rgba(235, 235, 245, 0.3);
+      --green: #30D158;
+      --blue: #0A84FF;
+      --orange: #FF9F0A;
+      --red: #FF453A;
+      --purple: #BF5AF2;
+      --yellow: #FFD60A;
+      --teal: #64D2FF;
+      --pink: #FF375F;
+    }
+    
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+      letter-spacing: -0.01em;
+    }
+    
+    body {
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: calc(80px + env(safe-area-inset-bottom));
+      min-height: 100vh;
+      background: 
+        radial-gradient(circle at 0% 0%, rgba(48, 209, 88, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 100% 100%, rgba(10, 132, 255, 0.06) 0%, transparent 40%),
+        #000;
+      background-attachment: fixed;
+    }
+    
+    #root { min-height: 100vh; }
+    
+    button { font-family: inherit; cursor: pointer; transition: all 0.2s; }
+    button:active { transform: scale(0.96); }
+    input { font-family: inherit; }
+    
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    
+    ::-webkit-scrollbar { display: none; }
+    
+    .fade-in { animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .slide-up { animation: slideUp 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .sync-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: rgba(48, 209, 88, 0.15);
+      border: 1px solid rgba(48, 209, 88, 0.3);
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--green);
+    }
+
+    .sync-badge.syncing {
+      background: rgba(10, 132, 255, 0.15);
+      border-color: rgba(10, 132, 255, 0.3);
+      color: var(--blue);
+    }
+
+    .sync-badge.error {
+      background: rgba(255, 69, 58, 0.15);
+      border-color: rgba(255, 69, 58, 0.3);
+      color: var(--red);
+    }
+
+    .sync-spinner {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const GOALS = { kcal: 2100, protein: 135, fat: 70, carbs: 240, water: 3000 };
+    const CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com"; // Muss gesetzt werden
+    const SCOPES = "https://www.googleapis.com/auth/drive.file";
+
+    const mealPresets = [
+      { name: "Omelette + Speck", kcal: 380, protein: 25, fat: 28, carbs: 2, emoji: "🍳" },
+      { name: "Proteinshake (40g)", kcal: 160, protein: 32, fat: 2, carbs: 5, emoji: "🥤" },
+      { name: "Skyr (200g)", kcal: 130, protein: 20, fat: 0.5, carbs: 6, emoji: "🥛" },
+      { name: "Thon Baguette Migros", kcal: 550, protein: 17, fat: 18, carbs: 65, emoji: "🥖" },
+      { name: "Thunfisch (120g) + Reis (150g)", kcal: 395, protein: 31, fat: 2, carbs: 42, emoji: "🍚" },
+      { name: "Banane", kcal: 90, protein: 1, fat: 0.3, carbs: 23, emoji: "🍌" },
+      { name: "Poulet + Gemüse", kcal: 420, protein: 50, fat: 15, carbs: 25, emoji: "🍗" },
+      { name: "Döner", kcal: 650, protein: 28, fat: 35, carbs: 55, emoji: "🌯" },
+      { name: "Wienerli im Teig", kcal: 320, protein: 11, fat: 22, carbs: 22, emoji: "🌭" },
+      { name: "Emmi Latte Eiskaffee", kcal: 160, protein: 5, fat: 5, carbs: 24, emoji: "☕" },
+    ];
+
+    // Google Drive Helper
+    class GoogleDriveSync {
+      constructor() {
+        this.accessToken = localStorage.getItem("gd_access_token");
+        this.fileId = localStorage.getItem("gd_file_id");
+        this.fileName = "fitness-tracker-backup.json";
+      }
+
+      async authenticate() {
+        return new Promise((resolve) => {
+          window.google?.accounts?.id?.initialize({
+            client_id: CLIENT_ID,
+            callback: async (response) => {
+              try {
+                this.accessToken = response.credential;
+                localStorage.setItem("gd_access_token", this.accessToken);
+                resolve(true);
+              } catch (err) {
+                console.error("Auth error:", err);
+                resolve(false);
+              }
+            }
+          });
+          window.google?.accounts?.id?.renderButton(
+            document.getElementById("gd-signin"),
+            { theme: "dark", size: "large" }
+          );
+        });
+      }
+
+      async findOrCreateFile() {
+        if (this.fileId) return true;
+        try {
+          const res = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=name='${this.fileName}' and trashed=false&spaces=drive&pageSize=1`,
+            { headers: { Authorization: `Bearer ${this.accessToken}` } }
+          );
+          const data = await res.json();
+          if (data.files?.length > 0) {
+            this.fileId = data.files[0].id;
+            localStorage.setItem("gd_file_id", this.fileId);
+            return true;
+          }
+          // Erstelle neue Datei
+          const metadata = { name: this.fileName };
+          const form = new FormData();
+          form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+          form.append("file", new Blob(["{}"], { type: "application/json" }));
+          const createRes = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${this.accessToken}` },
+            body: form
+          });
+          const fileData = await createRes.json();
+          this.fileId = fileData.id;
+          localStorage.setItem("gd_file_id", this.fileId);
+          return true;
+        } catch (err) {
+          console.error("File error:", err);
+          return false;
+        }
+      }
+
+      async upload(data) {
+        if (!this.accessToken || !this.fileId) return false;
+        try {
+          const metadata = { name: this.fileName };
+          const form = new FormData();
+          form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+          form.append("file", new Blob([JSON.stringify(data)], { type: "application/json" }));
+          const res = await fetch(
+            `https://www.googleapis.com/upload/drive/v3/files/${this.fileId}?uploadType=multipart`,
+            { method: "PATCH", headers: { Authorization: `Bearer ${this.accessToken}` }, body: form }
+          );
+          return res.ok;
+        } catch (err) {
+          console.error("Upload error:", err);
+          return false;
+        }
+      }
+
+      async download() {
+        if (!this.accessToken || !this.fileId) return null;
+        try {
+          const res = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${this.fileId}?alt=media`,
+            { headers: { Authorization: `Bearer ${this.accessToken}` } }
+          );
+          return await res.json();
+        } catch (err) {
+          console.error("Download error:", err);
+          return null;
+        }
+      }
+    }
+
+    // ========== COMPONENTS ==========
+    
+    function Card({ children, style = {}, gradient }) {
+      return (
+        <div style={{
+          background: gradient || "var(--bg-elev-1)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          borderRadius: 20,
+          padding: 16,
+          border: "1px solid var(--border)",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
+          ...style
+        }}>
+          {children}
+        </div>
+      );
+    }
+
+    function Ring({ value, max, color, label, unit, size = 110 }) {
+      const stroke = 10, r = (size - stroke) / 2, circ = 2 * Math.PI * r;
+      const pct = Math.min(value / max, 1), dash = pct * circ;
+      const percentage = Math.round(pct * 100);
+      
+      return (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+          <div style={{ position: "relative", width: size, height: size }}>
+            <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+              <defs>
+                <linearGradient id={`grad-${label}`} x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor={color} stopOpacity="1" />
+                  <stop offset="100%" stopColor={color} stopOpacity="0.7" />
+                </linearGradient>
+              </defs>
+              <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={stroke} />
+              <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={`url(#grad-${label})`} strokeWidth={stroke}
+                strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" 
+                style={{ transition: "stroke-dasharray 0.8s cubic-bezier(0.2, 0.8, 0.2, 1)", filter: `drop-shadow(0 0 8px ${color}40)` }} />
+            </svg>
+            <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.02em" }}>{Math.round(value)}</div>
+              <div style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>{unit}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+            <div style={{ fontSize: 13, color: "var(--text)", fontWeight: 600 }}>{label}</div>
+            <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{percentage}% von {max}{unit === "g" ? "g" : ""}</div>
+          </div>
+        </div>
+      );
+    }
+
+    function MacroBar({ value, max, color, label }) {
+      const pct = Math.min((value / max) * 100, 100);
+      return (
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 500 }}>{label}</span>
+            <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 500 }}>{Math.round(value)}</span>
+          </div>
+          <div style={{ width: "100%", height: 8, background: "rgba(255,255,255,0.06)", borderRadius: 4, overflow: "hidden" }}>
+            <div style={{ 
+              width: pct + "%", 
+              height: "100%", 
+              background: color,
+              transition: "width 0.6s cubic-bezier(0.2, 0.8, 0.2, 1)",
+              borderRadius: 4,
+              boxShadow: `0 0 12px ${color}60`
+            }} />
+          </div>
+        </div>
+      );
+    }
+
+    function SectionHeader({ icon, title, action }) {
+      return (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, padding: "0 4px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>{icon}</span>
+            <span style={{ fontSize: 13, color: "var(--text-secondary)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{title}</span>
+          </div>
+          {action}
+        </div>
+      );
+    }
+
+    function FitnessTracker() {
+      const [allData, setAllData] = useState({});
+      const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
+      const [tab, setTab] = useState("today");
+      const [showMealForm, setShowMealForm] = useState(false);
+      const [meal, setMeal] = useState({ name: "", kcal: "", protein: "", fat: "", carbs: "" });
+      const [editingMealIndex, setEditingMealIndex] = useState(null);
+      const [gdriveSync, setGdriveSync] = useState(null);
+      const [syncStatus, setSyncStatus] = useState("disconnected"); // disconnected, syncing, synced, error
+      const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+      // Init Google Drive
+      useEffect(() => {
+        const sync = new GoogleDriveSync();
+        setGdriveSync(sync);
+        const token = localStorage.getItem("gd_access_token");
+        if (token) {
+          setIsAuthenticated(true);
+          sync.accessToken = token;
+          sync.fileId = localStorage.getItem("gd_file_id");
+          downloadFromGDrive(sync);
+        }
+      }, []);
+
+      // Load from LocalStorage
+      useEffect(() => {
+        const stored = localStorage.getItem("fitnessData");
+        if (stored) {
+          try { setAllData(JSON.parse(stored)); } catch (err) { console.error(err); }
+        }
+      }, []);
+
+      // Auto-sync to LocalStorage
+      useEffect(() => {
+        localStorage.setItem("fitnessData", JSON.stringify(allData));
+        if (isAuthenticated && gdriveSync) {
+          syncToGDrive();
+        }
+      }, [allData]);
+
+      const syncToGDrive = async () => {
+        if (!gdriveSync?.accessToken) return;
+        setSyncStatus("syncing");
+        const success = await gdriveSync.upload(allData);
+        setSyncStatus(success ? "synced" : "error");
+        setTimeout(() => setSyncStatus("synced"), 3000);
+      };
+
+      const downloadFromGDrive = async (sync) => {
+        const data = await sync.download();
+        if (data) setAllData(data);
+      };
+
+      const handleGDriveAuth = async () => {
+        if (!gdriveSync) return;
+        setSyncStatus("syncing");
+        const success = await gdriveSync.authenticate();
+        if (success) {
+          await gdriveSync.findOrCreateFile();
+          setIsAuthenticated(true);
+          await syncToGDrive();
+        } else {
+          setSyncStatus("error");
+        }
+      };
+
+      const data = allData[currentDate] || { meals: [], workouts: [], water: 0, sleepDuration: 0, sleepScore: 0 };
+
+      const totalKcal = data.meals.reduce((sum, m) => sum + (m.kcal || 0), 0);
+      const totalProtein = data.meals.reduce((sum, m) => sum + (m.protein || 0), 0);
+      const totalFat = data.meals.reduce((sum, m) => sum + (m.fat || 0), 0);
+      const totalCarbs = data.meals.reduce((sum, m) => sum + (m.carbs || 0), 0);
+
+      const addOrEditMeal = (m) => {
+        if (!m.name || !m.kcal) { alert("❌ Name und kcal erforderlich"); return; }
+        let newMeals;
+        if (editingMealIndex !== null) {
+          newMeals = data.meals.map((existing, i) => i === editingMealIndex ? { ...m, kcal: +m.kcal || 0, protein: +m.protein || 0, fat: +m.fat || 0, carbs: +m.carbs || 0 } : existing);
+          setEditingMealIndex(null);
+        } else {
+          newMeals = [...data.meals, { ...m, kcal: +m.kcal || 0, protein: +m.protein || 0, fat: +m.fat || 0, carbs: +m.carbs || 0 }];
+        }
+        setAllData({ ...allData, [currentDate]: { ...data, meals: newMeals } });
+        setMeal({ name: "", kcal: "", protein: "", fat: "", carbs: "" });
+      };
+
+      const removeMeal = (index) => {
+        const newMeals = data.meals.filter((_, i) => i !== index);
+        setAllData({ ...allData, [currentDate]: { ...data, meals: newMeals } });
+      };
+
+      const btnPrimary = { padding: "14px 16px", borderRadius: 12, background: "rgba(48,209,88,0.2)", border: "1.5px solid rgba(48,209,88,0.5)", color: "var(--green)", fontWeight: 600, fontSize: 14 };
+      const btnSecondary = { padding: "12px 16px", borderRadius: 12, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--text)", fontWeight: 500, fontSize: 13 };
+      const inputStyle = { width: "100%", padding: "10px 12px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, color: "var(--text)", fontSize: 14 };
+      const labelStyle = { fontSize: 11, color: "var(--text-secondary)", fontWeight: 600, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" };
+
+      return (
+        <div style={{ position: "relative", minHeight: "100vh" }}>
+          
+          <div style={{ maxWidth: 480, margin: "0 auto", padding: "12px 12px 88px 12px" }}>
+            
+            {/* HEADER + SYNC STATUS */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, paddingTop: 12 }}>
+              <div>
+                <div style={{ fontSize: 13, color: "var(--text-secondary)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>
+                  Fitness Pro
+                </div>
+                <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em" }}>Tracker</div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+                <div className={`sync-badge ${syncStatus}`}>
+                  {syncStatus === "syncing" && <div className="sync-spinner"></div>}
+                  {syncStatus === "synced" && "☁️"}
+                  {syncStatus === "error" && "⚠️"}
+                  {syncStatus === "disconnected" && "📱"}
+                  {syncStatus === "syncing" ? "Syncing..." : syncStatus === "synced" ? "Synced" : syncStatus === "error" ? "Error" : "Offline"}
+                </div>
+                {!isAuthenticated && (
+                  <button onClick={handleGDriveAuth} style={{ ...btnSecondary, fontSize: 11, padding: "8px 12px" }}>
+                    🔗 Google Drive
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* GOOGLE DRIVE SIGNIN */}
+            {!isAuthenticated && (
+              <Card style={{ marginBottom: 16, padding: 12, background: "rgba(10,132,255,0.08)", border: "1px solid rgba(10,132,255,0.2)" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: "var(--blue)" }}>
+                  ☁️ Mit Google Drive synchen
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 10 }}>
+                  Automatische Backups & Zugriff von überall
+                </div>
+                <div id="gd-signin" style={{ marginBottom: -10 }}></div>
+              </Card>
+            )}
+
+            {/* MAHLZEITEN TAB */}
+            {tab === "mahlzeiten" && (
+              <div className="fade-in" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                
+                <Card style={{ padding: 14 }}>
+                  <div style={{ display: "flex", gap: 12, justifyContent: "space-around", textAlign: "center" }}>
+                    <div>
+                      <div style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 600 }}>KCAL</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "var(--orange)" }}>{totalKcal}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 600 }}>PROTEIN</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "var(--blue)" }}>{totalProtein}g</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 600 }}>FETT</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "var(--yellow)" }}>{totalFat}g</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 600 }}>CARBS</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "var(--purple)" }}>{totalCarbs}g</div>
+                    </div>
+                  </div>
+                </Card>
+
+                {!showMealForm && (
+                  <button onClick={() => { setMeal({ name: "", kcal: "", protein: "", fat: "", carbs: "" }); setEditingMealIndex(null); setShowMealForm(true); }} 
+                    style={{ ...btnPrimary, width: "100%" }}>
+                    ➕ Neue Mahlzeit hinzufügen
+                  </button>
+                )}
+
+                {showMealForm && (
+                  <Card className="slide-up" style={{ background: "rgba(48,209,88,0.08)", border: "1px solid rgba(48,209,88,0.2)" }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "var(--green)", marginBottom: 14 }}>
+                      {editingMealIndex !== null ? "✏️ Mahlzeit bearbeiten" : "➕ Neue Mahlzeit"}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      <div>
+                        <label style={labelStyle}>Name</label>
+                        <input type="text" value={meal.name} onChange={e => setMeal({...meal, name: e.target.value})} style={inputStyle} placeholder="z.B. Thunfisch + Reis" />
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                        <div>
+                          <label style={labelStyle}>Kalorien</label>
+                          <input type="number" value={meal.kcal} onChange={e => setMeal({...meal, kcal: e.target.value})} style={inputStyle} placeholder="395" />
+                        </div>
+                        <div>
+                          <label style={labelStyle}>Protein (g)</label>
+                          <input type="number" value={meal.protein} onChange={e => setMeal({...meal, protein: e.target.value})} style={inputStyle} placeholder="31" />
+                        </div>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                        <div>
+                          <label style={labelStyle}>Fett (g)</label>
+                          <input type="number" value={meal.fat} onChange={e => setMeal({...meal, fat: e.target.value})} style={inputStyle} placeholder="2" />
+                        </div>
+                        <div>
+                          <label style={labelStyle}>Carbs (g)</label>
+                          <input type="number" value={meal.carbs} onChange={e => setMeal({...meal, carbs: e.target.value})} style={inputStyle} placeholder="42" />
+                        </div>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 4 }}>
+                        <button onClick={() => { setShowMealForm(false); setMeal({ name: "", kcal: "", protein: "", fat: "", carbs: "" }); setEditingMealIndex(null); }} style={btnSecondary}>Abbrechen</button>
+                        <button onClick={() => { addOrEditMeal(meal); setShowMealForm(false); }} style={btnPrimary}>
+                          {editingMealIndex !== null ? "✓ Speichern" : "➕ Hinzufügen"}
+                        </button>
+                      </div>
+                    </div>
+                  </Card>
+                )}
+
+                {data.meals.length > 0 && (
+                  <div>
+                    <SectionHeader icon="🍽️" title={`Heute (${data.meals.length})`} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {data.meals.map((m, i) => (
+                        <Card key={i} style={{ padding: 14 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
+                              <div style={{ display: "flex", gap: 12, fontSize: 11, color: "var(--text-secondary)", flexWrap: "wrap" }}>
+                                <span><span style={{ color: "var(--orange)" }}>●</span> {m.kcal} kcal</span>
+                                <span><span style={{ color: "var(--blue)" }}>●</span> {m.protein}g P</span>
+                                {m.fat > 0 && <span><span style={{ color: "var(--yellow)" }}>●</span> {m.fat}g F</span>}
+                                {m.carbs > 0 && <span><span style={{ color: "var(--purple)" }}>●</span> {m.carbs}g C</span>}
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button onClick={() => { setMeal({ name: m.name, kcal: m.kcal, protein: m.protein, fat: m.fat, carbs: m.carbs }); setEditingMealIndex(i); setShowMealForm(true); }} 
+                                style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(10,132,255,0.15)", border: "1px solid rgba(10,132,255,0.25)", color: "var(--blue)", fontSize: 14 }}>✏️</button>
+                              <button onClick={() => removeMeal(i)} 
+                                style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(255,69,58,0.15)", border: "1px solid rgba(255,69,58,0.25)", color: "var(--red)", fontSize: 14 }}>✕</button>
+                            </div>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <SectionHeader icon="⚡" title="Schnellauswahl" />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {mealPresets.map((preset, i) => (
+                      <button key={i} onClick={() => addOrEditMeal(preset)} style={{
+                        textAlign: "left", padding: 12, background: "var(--bg-elev-1)", 
+                        backdropFilter: "blur(20px)", border: "1px solid var(--border)", 
+                        borderRadius: 14, color: "var(--text)", cursor: "pointer"
+                      }}>
+                        <div style={{ fontSize: 22, marginBottom: 6 }}>{preset.emoji}</div>
+                        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{preset.name}</div>
+                        <div style={{ fontSize: 10, color: "var(--text-secondary)" }}>{preset.kcal} kcal • {preset.protein}g P</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* PLACEHOLDER FOR OTHER TABS */}
+            {tab !== "mahlzeiten" && (
+              <div style={{ textAlign: "center", padding: 40 }}>
+                <div style={{ fontSize: 48, marginBottom: 16 }}>🚧</div>
+                <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>Coming Soon</div>
+                <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>Diese Seite wird noch entwickelt</div>
+              </div>
+            )}
+          </div>
+
+          {/* BOTTOM NAV */}
+          <div style={{ 
+            position: "fixed", bottom: 0, left: 0, right: 0,
+            background: "rgba(0,0,0,0.85)", 
+            backdropFilter: "blur(30px)", 
+            WebkitBackdropFilter: "blur(30px)",
+            borderTop: "1px solid var(--border)",
+            paddingBottom: "env(safe-area-inset-bottom)",
+            zIndex: 100
+          }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", padding: "8px 4px" }}>
+              {[
+                { key: "today", label: "Übersicht", icon: "📊" },
+                { key: "mahlzeiten", label: "Mahlzeiten", icon: "🍽️" },
+                { key: "workout", label: "Training", icon: "💪" },
+                { key: "fortschritt", label: "Stats", icon: "📈" },
+              ].map(t => (
+                <button key={t.key} onClick={() => setTab(t.key)} style={{
+                  padding: "8px 4px", border: "none", background: "transparent",
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+                  color: tab === t.key ? "var(--green)" : "var(--text-secondary)",
+                  cursor: "pointer", position: "relative"
+                }}>
+                  <div style={{ 
+                    fontSize: 22,
+                    transform: tab === t.key ? "scale(1.1)" : "scale(1)",
+                    transition: "transform 0.2s"
+                  }}>{t.icon}</div>
+                  <div style={{ fontSize: 10, fontWeight: 600 }}>{t.label}</div>
+                  {tab === t.key && (
+                    <div style={{ 
+                      position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
+                      width: 24, height: 3, background: "var(--green)", borderRadius: "0 0 4px 4px"
+                    }} />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<FitnessTracker />);
+  </script>
+</body>
+</html>
