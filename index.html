@@ -106,6 +106,28 @@ const BACKUP_FOLDER   = 'DEIN_DRIVE_ORDNER_ID'; // Optional
 // F: Schlaf Score (0-100)
 
 function doGet(e) {
+  // Backup via GET (CORS-kompatibel)
+  if (e.parameter && e.parameter.payload) {
+    try {
+      const payload = JSON.parse(decodeURIComponent(e.parameter.payload));
+      if (payload.action === 'backup') {
+        const folder = DriveApp.getFolderById(BACKUP_FOLDER);
+        const name   = 'fitness-backup-'
+                     + new Date().toISOString().split('T')[0]
+                     + '.json';
+        const files  = folder.getFilesByName(name);
+        while (files.hasNext()) files.next().setTrashed(true);
+        folder.createFile(name,
+          JSON.stringify(payload.data, null, 2),
+          MimeType.PLAIN_TEXT);
+        return out({ status:'ok' });
+      }
+    } catch(err) {
+      return out({ status:'error', error: err.message });
+    }
+  }
+
+  // Sync: Watch-Daten lesen
   const date = (e.parameter && e.parameter.date)
     ? e.parameter.date
     : new Date().toISOString().split('T')[0];
@@ -366,17 +388,16 @@ function out(data) {
         if (!backupUrl) { setShowSettings(true); return; }
         setSyncStatus('syncing');
         try {
-          const res  = await fetch(backupUrl, {
-            method: 'POST',
-            body: JSON.stringify({ action: 'backup', data: allData }),
-            headers: { 'Content-Type': 'text/plain' },
+          // Apps Script POST via form-encoded to avoid CORS preflight
+          const encoded = encodeURIComponent(JSON.stringify({ action: 'backup', data: allData }));
+          await fetch(`${backupUrl}?payload=${encoded}`, {
+            method: 'GET',
             redirect: 'follow',
+            mode: 'no-cors',
           });
-          const json = await res.json();
-          if (json.status !== 'ok') throw new Error(json.error || 'Backup fehlgeschlagen');
           setSyncStatus('success');
           setTimeout(() => setSyncStatus('idle'), 3000);
-          alert('✅ Drive Backup erfolgreich!');
+          alert('✅ Drive Backup gesendet!');
         } catch (err) {
           setSyncStatus('error');
           setTimeout(() => setSyncStatus('idle'), 5000);
